@@ -1,9 +1,46 @@
-venv/
+# Bytecode
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
-*.sqlite3
-*.env
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# VS Code settings
+.vscode/
+
+# System files
 .DS_Store
-*.log
+Thumbs.db
+
+# IDEs
+.idea/
+
+# Django-specific
+*.sqlite3
+db.sqlite3
+media/
+staticfiles/
+
+# Tests
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Environment variables
+.env
+.env.*
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Streamlit
+.streamlit/config.toml
