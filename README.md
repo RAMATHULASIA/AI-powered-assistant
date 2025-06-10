@@ -24,7 +24,7 @@ Model Optimization: 4-bit Quantization, GPU Acceleration
 
 
 Installation and Usage
-Clone the repository: git clone https://github.com/your-username/AI-powered-assistant.git
+Clone the repository: git clone https://github.com/RAMATHULASIA/AI-powered-assistant.git
 Install required libraries: pip install -r requirements.txt
 Run the Streamlit app: streamlit run app.py
 Contributing
