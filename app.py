@@ -1,18 +1,102 @@
+       
+# Install required packages (run in Google Colab cell)
+# !pip install streamlit gradio transformers torch accelerate plotly pandas
+
 import streamlit as st
+import gradio as gr
 import random
-from transformers import pipeline
+from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 import torch
 from datetime import date, datetime
 import pandas as pd
 import os
 import json
 import plotly.express as px
+import threading
+import time
 
-# ---------------------- UTILS -----------------------
+# ---------------------- MODEL LOADING -----------------------
 @st.cache_resource
-def load_feedback_generator():
-    return pipeline("text-generation", model="distilgpt2", device=0 if torch.cuda.is_available() else -1)
+def load_granite_model():
+    """Load IBM Granite 3.3-2B Instruct model"""
+    model_name = "ibm-granite/granite-3.3-2b-instruct"
+    
+    print("Loading IBM Granite model...")
+    
+    # Load tokenizer and model
+    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+    model = AutoModelForCausalLM.from_pretrained(
+        model_name,
+        device_map="auto",
+        torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+        trust_remote_code=True
+    )
+    
+    # Create text generation pipeline
+    text_generator = pipeline(
+        "text-generation",
+        model=model,
+        tokenizer=tokenizer,
+        device_map="auto",
+        max_length=512,
+        temperature=0.7,
+        do_sample=True,
+        pad_token_id=tokenizer.eos_token_id
+    )
+    
+    print("Model loaded successfully!")
+    return text_generator, tokenizer
 
+# ---------------------- GRANITE-POWERED FUNCTIONS -----------------------
+def generate_personalized_questions(topic, grade_level, num_questions=3):
+    """Generate personalized questions using Granite model"""
+    prompt = f"""Generate {num_questions} educational questions for {grade_level} students about {topic}. 
+    Make them engaging and appropriate for the grade level. Format as a numbered list:
+    
+    Topic: {topic}
+    Grade: {grade_level}
+    Questions:"""
+    
+    try:
+        result = granite_generator(prompt, max_new_tokens=200, num_return_sequences=1)
+        return result[0]['generated_text'].split("Questions:")[-1].strip()
+    except Exception as e:
+        return f"Error generating questions: {str(e)}"
+
+def generate_ai_feedback(score, subject, student_answer=""):
+    """Generate personalized feedback using Granite model"""
+    performance_level = "excellent" if score >= 85 else "good" if score >= 70 else "needs improvement"
+    
+    prompt = f"""As an AI teaching assistant, provide constructive feedback for a student who scored {score}% in {subject}. 
+    Their performance level is {performance_level}. 
+    Student's answer: "{student_answer}"
+    
+    Provide encouraging and specific feedback to help them improve:"""
+    
+    try:
+        result = granite_generator(prompt, max_new_tokens=150, num_return_sequences=1)
+        feedback = result[0]['generated_text'].split("Provide encouraging and specific feedback to help them improve:")[-1].strip()
+        return feedback
+    except Exception as e:
+        return f"Great effort! Keep practicing to improve your understanding of {subject}."
+
+def ai_teaching_assistant(question, context=""):
+    """AI Teaching Assistant powered by Granite"""
+    prompt = f"""You are an AI teaching assistant. Answer the student's question clearly and helpfully.
+    
+    Context: {context}
+    Student Question: {question}
+    
+    Answer:"""
+    
+    try:
+        result = granite_generator(prompt, max_new_tokens=200, num_return_sequences=1)
+        answer = result[0]['generated_text'].split("Answer:")[-1].strip()
+        return answer
+    except Exception as e:
+        return f"I'm sorry, I couldn't process your question right now. Please try again."
+
+# ---------------------- UTILITY FUNCTIONS -----------------------
 def save_quiz_submission(data):
     os.makedirs("quiz_submissions", exist_ok=True)
     file_path = f"quiz_submissions/{data['Name'].replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
@@ -23,217 +107,424 @@ def rubric_score(answer):
     score = 0
     if len(answer) > 10:
         score += 2
-    if any(word in answer.lower() for word in ["because", "therefore", "explains"]):
+    if any(word in answer.lower() for word in ["because", "therefore", "explains", "process", "result"]):
         score += 2
     if answer[0].isupper() and answer.endswith('.'):
         score += 1
     return min(score, 5)
 
-feedback_generator = load_feedback_generator()
+# ---------------------- STREAMLIT APP -----------------------
+def run_streamlit_app():
+    st.set_page_config(page_title="AI Education Platform", page_icon="🎓", layout="wide")
+    
+    # Load model
+    global granite_generator, tokenizer
+    granite_generator, tokenizer = load_granite_model()
+    
+    # ---------------------- SIDEBAR NAVIGATION -----------------------
+    st.sidebar.title("🎓 AI Education Platform")
+    st.sidebar.markdown("*Powered by IBM Granite AI*")
+    
+    section = st.sidebar.radio("Navigate to:", [
+        "🏠 Home", 
+        "👤 Student Profile", 
+        "📝 AI Assessments", 
+        "💬 AI Feedback", 
+        "📤 Submission", 
+        "🧠 AI Quiz Grader", 
+        "📊 Performance Dashboard", 
+        "🤖 AI Teaching Assistant"
+    ])
 
-# ---------------------- SIDEBAR NAVIGATION -----------------------
-st.sidebar.title("Navigation")
-section = st.sidebar.radio("Go to", ["🏠 Home", "👤 Student Profile", "📝 Assessments", "💬 Feedback", "📤 Submission", "🧠 Quiz Grader", "📊 Performance Dashboard", "💬 AI Teaching Assistant"])
+    # ---------------------- HOME SECTION -----------------------
+    if section == "🏠 Home":
+        st.title("🎓 AI-Powered Educational Platform")
+        st.markdown("### Welcome to the future of personalized learning!")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("#### 🚀 **Key Features**")
+            st.markdown("""
+            - **AI-Generated Questions**: Personalized assessments using IBM Granite
+            - **Intelligent Feedback**: AI-powered performance analysis
+            - **Real-time Grading**: Automated quiz evaluation
+            - **Performance Tracking**: Visual progress monitoring
+            - **24/7 AI Tutor**: Always available teaching assistant
+            """)
+        
+        with col2:
+            st.markdown("#### 🛠️ **Technologies**")
+            st.markdown("""
+            | Component | Technology |
+            |-----------|------------|
+            | **AI Model** | IBM Granite 3.3-2B Instruct |
+            | **Framework** | Streamlit + Gradio |
+            | **Platform** | Google Colab |
+            | **Libraries** | Transformers, PyTorch |
+            | **Visualization** | Plotly |
+            """)
 
-# ---------------------- AI TEACHING ASSISTANT -----------------------
-@st.cache_resource
-def load_qa_model():
-    return pipeline("question-answering", model="distilbert-base-uncased-distilled-squad")  # Replace with your custom model
+    # ---------------------- STUDENT PROFILE -----------------------
+    elif section == "👤 Student Profile":
+        st.title("👤 Student Profile")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            name = st.text_input("📝 Student Name:")
+            age = st.number_input("🎂 Age:", min_value=5, max_value=100, value=15)
+            grade = st.selectbox("🎓 Grade Level:", [
+                "Elementary (K-5)", "Middle School (6-8)", 
+                "High School (9-12)", "College", "Graduate"
+            ])
+        
+        with col2:
+            interests = st.text_area("🎯 Learning Interests:", 
+                placeholder="e.g., Mathematics, Science, Literature, History...")
+            learning_style = st.selectbox("📚 Preferred Learning Style:", [
+                "Visual", "Auditory", "Kinesthetic", "Reading/Writing"
+            ])
+        
+        if st.button("💾 Save Profile", type="primary"):
+            st.session_state.student_profile = {
+                "name": name, "age": age, "grade": grade, 
+                "interests": interests, "learning_style": learning_style
+            }
+            st.success(f"✅ Profile saved for {name}!")
+            st.balloons()
 
-qa_model = load_qa_model()
+    # ---------------------- AI ASSESSMENTS -----------------------
+    elif section == "📝 AI Assessments":
+        st.title("📝 AI-Generated Assessments")
+        
+        profile = st.session_state.get("student_profile", {})
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            topic = st.text_input("📚 Subject/Topic:", 
+                value=profile.get("interests", "Mathematics").split(",")[0])
+            grade_level = st.selectbox("🎓 Grade Level:", [
+                "Elementary", "Middle School", "High School", "College"
+            ], index=2)
+        
+        with col2:
+            num_questions = st.slider("❓ Number of Questions:", 1, 5, 3)
+            difficulty = st.select_slider("⚡ Difficulty Level:", [
+                "Beginner", "Intermediate", "Advanced"
+            ])
+        
+        if st.button("🤖 Generate AI Assessment", type="primary"):
+            with st.spinner("🧠 AI is creating personalized questions..."):
+                questions = generate_personalized_questions(topic, grade_level, num_questions)
+                
+                st.markdown("### 📋 Your Personalized Assessment")
+                st.markdown(f"**Subject:** {topic} | **Level:** {grade_level}")
+                st.markdown("---")
+                st.markdown(questions)
 
-# Sidebar-based chatbot for dynamic Q&A (AI Teaching Assistant)
-if section == "💬 AI Teaching Assistant":
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("### 🤖 AI Teaching Assistant")
+    # ---------------------- AI FEEDBACK -----------------------
+    elif section == "💬 AI Feedback":
+        st.title("💬 AI-Powered Feedback")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            subject = st.selectbox("📚 Subject:", [
+                "Mathematics", "Science", "English", "History", "Art"
+            ])
+            score = st.slider("📊 Student Score (%):", 0, 100, 75)
+        
+        with col2:
+            student_answer = st.text_area("📝 Student's Answer (optional):", 
+                placeholder="Paste the student's response here for more personalized feedback...")
+        
+        if st.button("🤖 Generate AI Feedback", type="primary"):
+            with st.spinner("🧠 AI is analyzing performance..."):
+                feedback = generate_ai_feedback(score, subject, student_answer)
+                
+                # Performance indicator
+                if score >= 85:
+                    st.success("🎉 Excellent Performance!")
+                elif score >= 70:
+                    st.info("👍 Good Work!")
+                else:
+                    st.warning("💪 Room for Improvement!")
+                
+                st.markdown("### 🤖 AI Feedback")
+                st.markdown(feedback)
 
-    if "chat_history" not in st.session_state:
-        st.session_state.chat_history = []
+    # ---------------------- AI TEACHING ASSISTANT -----------------------
+    elif section == "🤖 AI Teaching Assistant":
+        st.title("🤖 AI Teaching Assistant")
+        st.markdown("*Ask me anything about your studies!*")
+        
+        # Initialize chat history
+        if "chat_history" not in st.session_state:
+            st.session_state.chat_history = []
+        
+        # Chat interface
+        user_question = st.text_input("💭 Ask your question:", 
+            placeholder="e.g., Explain photosynthesis, Help with algebra, What is the water cycle?")
+        
+        col1, col2 = st.columns([1, 4])
+        with col1:
+            ask_button = st.button("🚀 Ask AI", type="primary")
+        with col2:
+            if st.button("🗑️ Clear Chat"):
+                st.session_state.chat_history = []
+                st.rerun()
+        
+        if ask_button and user_question:
+            with st.spinner("🤖 AI is thinking..."):
+                # Add context based on student profile
+                profile = st.session_state.get("student_profile", {})
+                context = f"Student grade: {profile.get('grade', 'High School')}, Interests: {profile.get('interests', 'General')}"
+                
+                response = ai_teaching_assistant(user_question, context)
+                
+                # Add to chat history
+                st.session_state.chat_history.append(("user", user_question))
+                st.session_state.chat_history.append(("assistant", response))
+        
+        # Display chat history
+        if st.session_state.chat_history:
+            st.markdown("### 💬 Chat History")
+            for i, (role, message) in enumerate(reversed(st.session_state.chat_history[-10:])):
+                if role == "user":
+                    st.markdown(f"**👤 You:** {message}")
+                else:
+                    st.markdown(f"**🤖 AI Assistant:** {message}")
+                st.markdown("---")
 
-    user_question = st.sidebar.text_input("Ask me anything about your subject:")
-
-    if st.sidebar.button("Ask"):
-        if user_question:
-            st.session_state.chat_history.append(("user", user_question))
-
-            # Constructing context dynamically (you can replace this with real-time subject content)
-            context = """
-            Photosynthesis is the process by which green plants and some other organisms use sunlight to synthesize foods 
-            with the help of chlorophyll. During this process, plants convert carbon dioxide and water into glucose and oxygen.
-            """
+    # ---------------------- QUIZ GRADER -----------------------
+    elif section == "🧠 AI Quiz Grader":
+        st.title("🧠 AI-Powered Quiz Grader")
+        
+        with st.form("quiz_form"):
+            col1, col2 = st.columns(2)
             
-            # Get answer from the Hugging Face QA model
-            try:
-                result = qa_model(question=user_question, context=context)
-                assistant_reply = result["answer"]
-            except Exception as e:
-                assistant_reply = f"Sorry, I couldn't fetch the answer. Error: {str(e)}"
+            with col1:
+                name = st.text_input("👤 Student Name:")
+                subject = st.selectbox("📚 Subject:", ["Mathematics", "Science", "English", "History"])
             
-            st.session_state.chat_history.append(("assistant", assistant_reply))
+            with col2:
+                quiz_type = st.selectbox("📋 Quiz Type:", ["Mixed", "Multiple Choice", "Short Answer"])
+            
+            # Sample questions
+            st.markdown("### 📝 Sample Questions")
+            
+            # MCQ
+            mcq_q = st.radio("🔘 What is the capital of France?", 
+                ["Berlin", "Madrid", "Paris", "Rome"])
+            
+            # Short answer
+            short_answer = st.text_area("✍️ Explain the process of photosynthesis:", 
+                placeholder="Write your answer here...")
+            
+            # File upload
+            uploaded_file = st.file_uploader("📎 Upload additional answers (TXT):", type=["txt"])
+            
+            submit_quiz = st.form_submit_button("🎯 Grade Quiz with AI", type="primary")
+            
+            if submit_quiz and name:
+                with st.spinner("🤖 AI is grading your quiz..."):
+                    # Calculate scores
+                    mcq_score = 5 if mcq_q == "Paris" else 0
+                    short_score = rubric_score(short_answer)
+                    
+                    file_answer = ""
+                    file_score = 0
+                    if uploaded_file:
+                        content = uploaded_file.read().decode("utf-8")
+                        file_answer = content
+                        file_score = rubric_score(content)
+                    
+                    total_score = mcq_score + short_score + file_score
+                    percentage = (total_score / 15) * 100
+                    
+                    # Generate AI feedback
+                    ai_feedback = generate_ai_feedback(percentage, subject, short_answer)
+                    
+                    # Display results
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("MCQ Score", f"{mcq_score}/5")
+                    with col2:
+                        st.metric("Written Score", f"{short_score}/5")
+                    with col3:
+                        st.metric("File Score", f"{file_score}/5")
+                    
+                    st.markdown("### 📊 Overall Performance")
+                    st.progress(percentage/100)
+                    st.markdown(f"**Total Score: {total_score}/15 ({percentage:.1f}%)**")
+                    
+                    st.markdown("### 🤖 AI Feedback")
+                    st.info(ai_feedback)
+                    
+                    # Save submission
+                    submission_data = {
+                        "Name": name, "Subject": subject, "MCQ_Score": mcq_score,
+                        "Short_Score": short_score, "File_Score": file_score,
+                        "Total": total_score, "Percentage": percentage,
+                        "AI_Feedback": ai_feedback, "Date": str(datetime.now())
+                    }
+                    save_quiz_submission(submission_data)
 
-    if st.session_state.chat_history:
-        for role, msg in reversed(st.session_state.chat_history[-5:]):
-            if role == "user":
-                st.sidebar.markdown(f"**You:** {msg}")
+    # ---------------------- PERFORMANCE DASHBOARD -----------------------
+    elif section == "📊 Performance Dashboard":
+        st.title("📊 Student Performance Dashboard")
+        
+        if os.path.exists("quiz_submissions") and os.listdir("quiz_submissions"):
+            # Load data
+            all_files = os.listdir("quiz_submissions")
+            data = []
+            for file in all_files:
+                try:
+                    with open(f"quiz_submissions/{file}", "r") as f:
+                        data.append(json.load(f))
+                except:
+                    continue
+            
+            if data:
+                df = pd.DataFrame(data)
+                df['Date'] = pd.to_datetime(df['Date'])
+                
+                # Student selector
+                student_names = df['Name'].unique()
+                selected_student = st.selectbox("👤 Select Student:", student_names)
+                
+                # Filter data
+                student_data = df[df['Name'] == selected_student].sort_values("Date")
+                
+                # Metrics
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Total Quizzes", len(student_data))
+                with col2:
+                    avg_score = student_data['Percentage'].mean()
+                    st.metric("Average Score", f"{avg_score:.1f}%")
+                with col3:
+                    best_score = student_data['Percentage'].max()
+                    st.metric("Best Score", f"{best_score:.1f}%")
+                with col4:
+                    recent_score = student_data['Percentage'].iloc[-1]
+                    st.metric("Recent Score", f"{recent_score:.1f}%")
+                
+                # Performance chart
+                fig = px.line(student_data, x="Date", y="Percentage", 
+                            title=f"📈 Performance Trend - {selected_student}",
+                            markers=True)
+                fig.update_layout(yaxis_range=[0, 100])
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Subject breakdown
+                if len(student_data['Subject'].unique()) > 1:
+                    subject_avg = student_data.groupby('Subject')['Percentage'].mean().reset_index()
+                    fig2 = px.bar(subject_avg, x='Subject', y='Percentage',
+                                title="📚 Average Score by Subject")
+                    st.plotly_chart(fig2, use_container_width=True)
             else:
-                st.sidebar.markdown(f"**Assistant:** {msg}")
+                st.warning("⚠️ No valid quiz data found.")
+        else:
+            st.info("📝 No quiz submissions yet. Complete some quizzes to see performance data!")
 
-# ---------------------- HOME SECTION -----------------------
-elif section == "🏠 Home":
-    st.markdown("## **AI-Powered Educational Platform**")
-    st.write("Welcome to the AI-powered platform that personalizes learning for students!")
+# ---------------------- GRADIO INTERFACE -----------------------
+def create_gradio_interface():
+    """Create Gradio interface for the AI Teaching Assistant"""
+    
+    def gradio_chat(message, history):
+        response = ai_teaching_assistant(message)
+        history.append([message, response])
+        return "", history
+    
+    def gradio_generate_questions(topic, grade, num_questions):
+        return generate_personalized_questions(topic, grade, num_questions)
+    
+    def gradio_feedback(score, subject, answer):
+        return generate_ai_feedback(float(score), subject, answer)
+    
+    # Create Gradio blocks
+    with gr.Blocks(title="AI Education Platform", theme=gr.themes.Soft()) as demo:
+        gr.Markdown("# 🎓 AI Education Platform")
+        gr.Markdown("*Powered by IBM Granite 3.3-2B Instruct*")
+        
+        with gr.Tab("🤖 AI Teaching Assistant"):
+            chatbot = gr.Chatbot(label="Chat with AI Teacher")
+            msg = gr.Textbox(label="Ask a question", placeholder="e.g., Explain photosynthesis...")
+            clear = gr.Button("Clear Chat")
+            
+            msg.submit(gradio_chat, [msg, chatbot], [msg, chatbot])
+            clear.click(lambda: None, None, chatbot, queue=False)
+        
+        with gr.Tab("📝 Generate Questions"):
+            with gr.Row():
+                topic_input = gr.Textbox(label="Topic", placeholder="e.g., Mathematics")
+                grade_input = gr.Dropdown(["Elementary", "Middle School", "High School"], label="Grade Level")
+                num_input = gr.Slider(1, 5, value=3, label="Number of Questions")
+            
+            generate_btn = gr.Button("Generate Questions", variant="primary")
+            questions_output = gr.Textbox(label="Generated Questions", lines=10)
+            
+            generate_btn.click(gradio_generate_questions, 
+                             [topic_input, grade_input, num_input], 
+                             questions_output)
+        
+        with gr.Tab("💬 AI Feedback"):
+            with gr.Row():
+                score_input = gr.Slider(0, 100, value=75, label="Score (%)")
+                subject_input = gr.Dropdown(["Mathematics", "Science", "English"], label="Subject")
+            
+            answer_input = gr.Textbox(label="Student Answer (Optional)", lines=3)
+            feedback_btn = gr.Button("Generate Feedback", variant="primary")
+            feedback_output = gr.Textbox(label="AI Feedback", lines=5)
+            
+            feedback_btn.click(gradio_feedback,
+                             [score_input, subject_input, answer_input],
+                             feedback_output)
+    
+    return demo
 
-    st.markdown("### **Expected Solutions**")
-    st.markdown(""" 
-    1. ✅ Increased student engagement and improved academic performance.  
-    2. ✅ Reduced workload for teachers through automated grading and content personalization.  
-    3. ✅ Enhanced efficiency and effectiveness in educational assessment and instructional planning.
-    """)
+# ---------------------- DEPLOYMENT FUNCTIONS -----------------------
+def run_streamlit():
+    """Run Streamlit app"""
+    run_streamlit_app()
 
-    st.markdown("### **Technologies & Tools**")
-    st.markdown(""" 
-    | Component              | Technologies & Tools                          |
-    |------------------------|-----------------------------------------------|
-    | Generative AI Models   | IBM Granite LLM                               |
-    | Programming Language   | Python                                        |
-    | Frameworks & Libraries | LangChain, Hugging Face, Pandas, NumPy        |
-    | User Interface         | Streamlit                                     |
-    | Development Environment| Jupyter Notebook, Google Colab                |
-    """, unsafe_allow_html=True)
+def run_gradio():
+    """Run Gradio app"""
+    # Load model for Gradio
+    global granite_generator, tokenizer
+    granite_generator, tokenizer = load_granite_model()
+    
+    demo = create_gradio_interface()
+    demo.launch(share=True, debug=True)
 
-# ---------------------- STUDENT PROFILE -----------------------
-elif section == "👤 Student Profile":
-    st.markdown("## **Student Profile**")
-    name = st.text_input("Enter student name:")
-    age = st.number_input("Enter age:", min_value=5, max_value=100)
-    grade = st.selectbox("Select grade:", ["Grade 1", "Grade 2", "Grade 3", "Grade 4", "Grade 5", "High School", "College"])
-    interests = st.text_area("Learning Interests (e.g., Math, Science, Art):")
-    if st.button("Save Profile"):
-        st.session_state.student_profile = {"name": name, "age": age, "grade": grade, "interests": interests}
-        st.success(f"Profile saved for {name}!")
-
-# ---------------------- ASSESSMENTS -----------------------
-elif section == "📝 Assessments":
-    st.markdown("## **Assessments**")
-    interests = st.session_state.get("student_profile", {}).get("interests", "Math, Science")
-    st.write(f"Based on your interests: {interests}")
-    topic = st.selectbox("Choose a subject for personalized questions:", interests.split(", "))
-    if st.button("Generate Assessment"):
-        st.markdown(f"### Sample Questions for **{topic}**")
-        questions = {
-            "Math": ["What is 12 x 8?", "Solve for x: 3x + 5 = 20"],
-            "Science": ["What is H2O?", "Explain photosynthesis."],
-            "English": ["Use 'courage' in a sentence.", "What is a simile?"]
-        }
-        for q in random.sample(questions.get(topic, ["Define your topic."]), 2):
-            st.write("- " + q)
-
-# ---------------------- FEEDBACK -----------------------
-elif section == "💬 Feedback":
-    st.markdown("## **Feedback**")
-    score = st.slider("Student's score (%)", 0, 100, 70)
-    performance = "excellent" if score >= 85 else "moderate" if score >= 60 else "needs improvement"
-    prompt = f"Give feedback for a student who scored {score}% and has {performance} performance."
-    if st.button("Generate Feedback"):
-        with st.spinner("Generating feedback..."):
-            result = feedback_generator(prompt, max_length=100, num_return_sequences=1)[0]['generated_text']
-            st.write(result)
-
-# ---------------------- SUBMISSION -----------------------
-elif section == "📤 Submission":
-    st.markdown("## 📚 Project Submission Portal")
-    if "submission_start" not in st.session_state:
-        st.session_state.submission_start = date.today()
-    if "submission_end" not in st.session_state:
-        st.session_state.submission_end = date.today()
-    st.sidebar.markdown("### Admin Panel")
-    if st.sidebar.checkbox("I'm an admin"):
-        st.session_state.submission_start = st.sidebar.date_input("Submission Start Date", st.session_state.submission_start)
-        st.session_state.submission_end = st.sidebar.date_input("Submission End Date", st.session_state.submission_end)
-
-    today = date.today()
-    start, end = st.session_state.submission_start, st.session_state.submission_end
-    status = "🟢 Open" if start <= today <= end else "🔴 Closed"
-    st.markdown(f"### Submission Status: {status}")
-
-    if status == "🟢 Open":
-        with st.form("submission_form"):
-            name = st.text_input("Full Name")
-            email = st.text_input("Email")
-            subject = st.text_input("Subject")
-            uploaded_file = st.file_uploader("Upload file", type=["pdf", "zip"])
-            submitted = st.form_submit_button("Submit")
-            if submitted and name and email and subject and uploaded_file:
-                df = pd.DataFrame([{"Name": name, "Email": email, "Subject": subject, "File": uploaded_file.name, "Date": str(date.today())}])
-                os.makedirs("uploads", exist_ok=True)
-                with open(os.path.join("uploads", uploaded_file.name), "wb") as f:
-                    f.write(uploaded_file.read())
-                df.to_csv("submissions.csv", mode="a", index=False, header=not os.path.exists("submissions.csv"))
-                st.success("Submission successful!")
-            elif submitted:
-                st.error("Please fill all fields.")
-
-# ---------------------- AI QUIZ GRADER -----------------------
-elif section == "🧠 Quiz Grader":
-    st.markdown("## 🧠 AI-Powered Quiz Grader")
-    with st.form("quiz_form"):
-        name = st.text_input("Student Name")
-        subject = st.selectbox("Subject", ["Math", "Science", "English"])
-        mcq_q = st.radio("What is the capital of France?", ["Berlin", "Madrid", "Paris", "Rome"])
-        short_answer = st.text_area("Explain the process of photosynthesis:")
-        uploaded_text = st.file_uploader("Upload written answers (TXT)", type=["txt"])
-        submit_quiz = st.form_submit_button("Grade Quiz")
-
-        if submit_quiz:
-            mcq_score = 5 if mcq_q == "Paris" else 0
-            rubric = rubric_score(short_answer)
-            file_answer = ""
-            file_score = 0
-            if uploaded_text:
-                content = uploaded_text.read().decode("utf-8")
-                file_answer = content
-                file_score = rubric_score(content)
-
-            total = mcq_score + rubric + file_score
-            feedback = feedback_generator(f"Give feedback for a student who scored {total} out of 15.", max_length=80)[0]['generated_text']
-            st.markdown("### 🧾 Results")
-            st.write(f"- MCQ Score: {mcq_score}/5")
-            st.write(f"- Written Score: {rubric}/5")
-            st.write(f"- Uploaded Answer Score: {file_score}/5")
-            st.write(f"### 💬 Feedback: {feedback}")
-
-            save_quiz_submission({
-                "Name": name,
-                "Subject": subject,
-                "MCQ": mcq_q,
-                "Short Answer": short_answer,
-                "Short Score": rubric,
-                "File Answer": file_answer,
-                "File Score": file_score,
-                "MCQ Score": mcq_score,
-                "Total": total,
-                "Date": str(datetime.now())
-            })
-
-# ---------------------- PERFORMANCE DASHBOARD -----------------------
-elif section == "📊 Performance Dashboard":
-    st.markdown("## 📊 Student Performance Dashboard")
-    if os.path.exists("quiz_submissions"):
-        all_files = os.listdir("quiz_submissions")
-        data = []
-        for file in all_files:
-            with open(f"quiz_submissions/{file}", "r") as f:
-                data.append(json.load(f))
-
-        df = pd.DataFrame(data)
-        df['Date'] = pd.to_datetime(df['Date'])
-
-        student_names = df['Name'].unique()
-        selected_student = st.selectbox("Select a student", student_names)
-
-        filtered = df[df['Name'] == selected_student].sort_values("Date")
-
-        fig = px.line(filtered, x="Date", y="Total", title=f"Performance of {selected_student} Over Time", markers=True)
-        st.plotly_chart(fig)
+# ---------------------- MAIN EXECUTION -----------------------
+if __name__ == "__main__":
+    import sys
+    
+    # Check if running in Streamlit
+    if "streamlit" in sys.modules:
+        run_streamlit_app()
     else:
-        st.warning("No quiz data found yet. Grade some quizzes to populate the dashboard.")
+        # For Google Colab - you can choose which interface to run
+        print("Choose interface:")
+        print("1. Streamlit")
+        print("2. Gradio")
+        print("3. Both")
+        
+        choice = input("Enter choice (1/2/3): ")
+        
+        if choice == "1":
+            # Run Streamlit
+            os.system("streamlit run script.py")
+        elif choice == "2":
+            # Run Gradio
+            run_gradio()
+        elif choice == "3":
+            # Run both (Gradio first, then Streamlit in background)
+            thread = threading.Thread(target=run_gradio)
+            thread.start()
+            time.sleep(5)  # Wait for Gradio to start
+            os.system("streamlit run script.py")
